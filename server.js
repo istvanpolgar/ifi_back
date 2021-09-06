@@ -1312,7 +1312,6 @@ app.post('/ores_to_points', (req, res) => {
 
     let id = 0;
     let dp = 0;
-    let point_now = 0;
     let ores = {};
     let prices = {};
 
@@ -1323,7 +1322,6 @@ app.post('/ores_to_points', (req, res) => {
           if(user.val().team === team)
           {
             id = user.key;
-            point_now = user.val().point;
             dp = user.val().daily_point;
             ores = user.val().ores;
           }
