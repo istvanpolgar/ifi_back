@@ -130,7 +130,13 @@ app.post('/signup', async (req, res) => {
             }
         })
         .then( () => {
-          res.send({status: 'Validated'})
+          database.ref('xp_missions/' + admin.currentUser.uid)
+          .set({
+              db: 0
+          })
+          .then( () => {
+            res.send({status: 'Validated'})
+          })
         })
         .catch((error) => {
           res.send({code: 400, message: error.message});
@@ -183,7 +189,17 @@ app.post('/team_info', async (req, res) => {
 
     let points = [];
     let stats = {};
+    let hxp = 0;
     
+    await database.ref('hour_xp')
+      .once('value')
+      .then( (h) => {
+        hxp = h.val();
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
     await database.ref('ores_to_points')
       .once('value')
       .then((otp) => { 
@@ -206,7 +222,8 @@ app.post('/team_info', async (req, res) => {
       token: token,
       role: jwt.decode(token).role,
       stats: stats,
-      points: points
+      points: points,
+      hxp: hxp
     });
   });
 });
@@ -418,6 +435,17 @@ app.post('/trade', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
+    await database.ref('all_trades/' + jwt.decode(token).id + '/' + id)
+      .set({
+          pushed_ores: pushed_ores,
+          waited_ores: waited_ores,
+          team: team,
+          state: "kiközölt"
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
     await database.ref('users/' + jwt.decode(token).id)
       .update({
         'trades': id,
@@ -615,6 +643,14 @@ app.post('/refuze_trade', async (req, res) => {
       })
     
     await database.ref('trade/' + pushed_team_id + "/" + nr)
+      .update({
+        'state': "elutasítva a(z) " + this_team + " csapattól"
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('trade/' + pushed_team_id + "/" + nr)
       .remove()
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -678,6 +714,14 @@ app.post('/refuze_trade2', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
     
+    await database.ref('trade/' + jwt.decode(token).id + "/" + nr)
+      .update({
+        'state': "visszavont"
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
     await database.ref('trade/' + jwt.decode(token).id + "/" + nr)
       .remove()
       .catch((error) => {
@@ -767,6 +811,14 @@ app.post('/accept_trade', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
     
+    await database.ref('all_trades/' + pushed_team_id + "/" + nr)
+      .update({
+        'state': "elfogadva a(z) " + this_team + " csapattól"
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
     await database.ref('trade/' + pushed_team_id + "/" + nr)
       .remove()
       .catch((error) => {
@@ -945,6 +997,7 @@ app.post('/get_settings', (req, res) => {
     }
     let xp = 0;
     let dp = 0;
+    let hxp = 0;
     let prices = {};
     let points = {};
 
@@ -961,6 +1014,15 @@ app.post('/get_settings', (req, res) => {
       .once('value')
       .then( (point) => {
         dp = point.val();
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('hour_xp')
+      .once('value')
+      .then( (h) => {
+        hxp = h.val();
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -986,6 +1048,7 @@ app.post('/get_settings', (req, res) => {
     res.send({
       dp: dp,
       xp: xp,
+      hxp: hxp,
       prices: prices,
       points: points
     });
@@ -1149,6 +1212,264 @@ app.post('/addxp', (req, res) => {
       })
 
     res.send({status: "Added!"});
+  })
+});
+
+app.post('/xp_won', (req, res) => {
+  const token = req.headers.authorization.split(' ')[1];
+
+  const { team } = req.body;
+
+  if (!token) {
+    return res.send({code: 400, message: "Hiányzó token!"});;
+  }
+
+  if (!refreshTokens.includes(token)) {
+      return res.send({code: 400, message: "Helytelen token!"});
+  }
+
+  jwt.verify(token, refreshTokenSecret, async (err) => {
+    if (err) {
+        return res.send({code: 400, message: "Nem létező token!"});
+    }
+
+    let id = 0;
+    let xp_now = 0;
+    let xp = 0;
+    let db = 0;
+    let last_time = 0;
+    let now = new Date();
+
+    await database.ref('users')
+      .once('value')
+      .then( (users) => {
+        users.forEach( (user) => {
+          if(user.val().team === team)
+          {
+            id = user.key;
+            xp_now = user.val().xp;
+          }
+        })
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('xp_missions/' + id + '/db')
+      .once('value')
+      .then( (d) => {
+        db = d.val();
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+    
+
+    if(db === 0)
+    {
+      db = db + 1;
+
+      await database.ref('xp_missions/' + id + '/' + db)
+        .set({ time: now.getTime() })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
+
+      await database.ref('xp_missions/' + id)
+        .update({ 'db': db })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
+
+      await database.ref('hour_xp')
+        .once('value')
+        .then( (h) => {
+          xp = h.val();
+        })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
+
+      await database.ref('users/' + id)
+        .update({ 'xp': parseInt(xp_now) + parseInt(xp) })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
+
+      res.send({status: "Added!"});
+      }
+    else
+    {
+      await database.ref('xp_missions/' + id + '/' + db)
+        .once('value')
+        .then( (time) => {
+          last_time = time.val().time;
+        })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
+
+      if(Math.abs(now.getTime() - last_time)/1000 >= 3600)
+      {
+        db = db + 1;
+        await database.ref('xp_missions/' + id + '/' + db)
+          .set({ time: now.getTime() })
+          .catch((error) => {
+            res.send({code: 400, message: error.message});
+          })
+
+        await database.ref('xp_missions/' + id)
+          .update({ 'db': db })
+          .catch((error) => {
+            res.send({code: 400, message: error.message});
+          })
+
+        await database.ref('hour_xp')
+          .once('value')
+          .then( (h) => {
+            xp = h.val();
+          })
+          .catch((error) => {
+            res.send({code: 400, message: error.message});
+          })
+  
+        await database.ref('users/' + id)
+          .update({ 'xp': parseInt(xp_now) + parseInt(xp) })
+          .catch((error) => {
+            res.send({code: 400, message: error.message});
+          })
+    
+        res.send({status: "Added!"});
+      }
+      else
+        res.send({code: 400, message: "A csapat még kell várjon " + (60-Math.round(Math.abs(now.getTime() - last_time)/1000/60)) + " percet"});
+    }
+  })
+});
+
+app.post('/xp_lost', (req, res) => {
+  const token = req.headers.authorization.split(' ')[1];
+
+  const { team } = req.body;
+
+  if (!token) {
+    return res.send({code: 400, message: "Hiányzó token!"});;
+  }
+
+  if (!refreshTokens.includes(token)) {
+      return res.send({code: 400, message: "Helytelen token!"});
+  }
+
+  jwt.verify(token, refreshTokenSecret, async (err) => {
+    if (err) {
+        return res.send({code: 400, message: "Nem létező token!"});
+    }
+
+    let id = 0;
+    let db = 0;
+    let last_time = 0;
+    let now = new Date();
+
+    await database.ref('users')
+      .once('value')
+      .then( (users) => {
+        users.forEach( (user) => {
+          if(user.val().team === team)
+          {
+            id = user.key;
+          }
+        })
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('xp_missions/' + id + '/db')
+      .once('value')
+      .then( (d) => {
+        db = d.val();
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+    
+
+    if(db === 0)
+    {
+      db = db + 1;
+
+      await database.ref('xp_missions/' + id + '/' + db)
+        .set({ time: now.getTime() })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
+
+      await database.ref('xp_missions/' + id)
+        .update({ 'db': db })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
+
+      res.send({status: "Added!"});
+      }
+    else
+    {
+      await database.ref('xp_missions/' + id + '/' + db)
+        .once('value')
+        .then( (time) => {
+          last_time = time.val().time;
+        })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
+
+      if(Math.abs(now.getTime() - last_time)/1000 >= 3600)
+      {
+        db = db + 1;
+        await database.ref('xp_missions/' + id + '/' + db)
+          .set({ time: now.getTime() })
+          .catch((error) => {
+            res.send({code: 400, message: error.message});
+          })
+
+        await database.ref('xp_missions/' + id)
+          .update({ 'db': db })
+          .catch((error) => {
+            res.send({code: 400, message: error.message});
+          })
+    
+        res.send({status: "Added!"});
+      }
+      else
+        res.send({code: 400, message: "A csapat még kell várjon " + (60-Math.round(Math.abs(now.getTime() - last_time)/1000/60)) + " percet"});
+    }
+  })
+});
+
+app.post('/hour_xp', (req, res) => {
+  const token = req.headers.authorization.split(' ')[1];
+
+  if (!token) {
+    return res.send({code: 400, message: "Hiányzó token!"});;
+  }
+
+  if (!refreshTokens.includes(token)) {
+      return res.send({code: 400, message: "Helytelen token!"});
+  }
+
+  jwt.verify(token, refreshTokenSecret, async (err) => {
+    if (err) {
+        return res.send({code: 400, message: "Nem létező token!"});
+    }
+
+    await database.ref('hour_xp')
+      .once('value')
+      .then( (hxp) => {
+        res.send({xp: hxp.val()});
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
   })
 });
 
@@ -1364,6 +1685,56 @@ app.post('/ores_to_points', (req, res) => {
     }
     else
       res.send({code: 400, message: "Ma már nem lehet ennyi pontra váltani. Próbáld holnap!"});
+  })
+});
+
+app.post('/get_missions', (req, res) => {
+  const token = req.headers.authorization.split(' ')[1];
+  const { team } = req.body;
+  
+  if (!token) {
+    return res.send({code: 400, message: "Hiányzó token!"});;
+  }
+
+  if (!refreshTokens.includes(token)) {
+      return res.send({code: 400, message: "Helytelen token!"});
+  }
+
+  jwt.verify(token, refreshTokenSecret, async (err) => {
+    if (err) {
+        return res.send({code: 400, message: "Nem létező token!"});
+    }
+
+    let id = 0;
+    let missions = [];
+
+    await database.ref('users')
+      .once('value')
+      .then( (users) => {
+        users.forEach( (user) => {
+          if(user.val().team === team)
+          {
+            id = user.key;
+          }
+        })
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('xp_missions/' + id)
+      .once('value')
+      .then( (user) => {
+        user.forEach( (time) => {
+          if(time.key !== "db")
+            missions.push(time.val().time);
+        })
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+    
+    res.send({missions: missions});
   })
 });
 
