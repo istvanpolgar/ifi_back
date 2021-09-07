@@ -32,6 +32,39 @@ const refreshTokenSecret = 'thisisatokensecret';
 let refreshTokens = [];
 const jwt = require('jsonwebtoken');
 
+//CRON-JOB
+let CronJob = require('cron').CronJob;
+
+var job = new CronJob('59 23 * * * *', async function () {
+  let dp = 0;
+  await database.ref('daily_points')
+    .once('value')
+    .then( (point) => {
+      dp = point.val();
+      console.log(dp);
+    })
+    .catch((error) => {
+      console.log(error.message);
+    })
+
+  await database.ref('users')
+    .once('value')
+    .then( (users) => {
+      users.forEach( (user) => {
+        database.ref('users/' + user.key)
+          .update({ daily_point: dp  })
+          .catch((error) => {
+            console.log(error.message);
+          })
+      })
+    })
+    .catch((error) => {
+      console.log(error.message);
+    })
+}, null, true, 'Europe/Athens');
+
+job.start();
+
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;
   await signinSchema.validateAsync(req.body)
@@ -96,7 +129,7 @@ app.post('/signup', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
   
-  await database.ref('daily_poits')
+  await database.ref('daily_points')
     .once('value')
     .then( (point) => {
       dp = point.val();
@@ -1659,32 +1692,35 @@ app.post('/ores_to_points', (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
-    if(dp - otp >= 0) {
-      await database.ref('users/' + id)
-        .update({ 
-          'daily_point': parseInt(dp) - parseInt(otp),
-        })
-        .catch((error) => {
-          res.send({code: 400, message: error.message});
-        })
+    if(ores.bronze >= prices.bronze && ores.diamond >= prices.diamond && ores.gold >= prices.gold && ores.ifirald >= prices.ifirald && ores.iron >= prices.iron && ores.silver >= prices.silver)
+      if(dp - otp >= 0) {
+        await database.ref('users/' + id)
+          .update({ 
+            'daily_point': parseInt(dp) - parseInt(otp),
+          })
+          .catch((error) => {
+            res.send({code: 400, message: error.message});
+          })
 
-      await database.ref('users/' + id)
-        .child('ores')
-        .update({ 
-          'bronze': parseInt(ores.bronze) - parseInt(prices.bronze),
-          'diamond': parseInt(ores.diamond) - parseInt(prices.diamond),
-          'gold': parseInt(ores.gold) - parseInt(prices.gold),
-          'ifirald': parseInt(ores.ifirald) - parseInt(prices.ifirald),
-          'iron': parseInt(ores.iron) - parseInt(prices.iron),
-          'silver': parseInt(ores.silver) - parseInt(prices.silver),
-        })
-        .catch((error) => {
-          res.send({code: 400, message: error.message});
-        })
-      res.send({status: "Added!"});
-    }
+        await database.ref('users/' + id)
+          .child('ores')
+          .update({ 
+            'bronze': parseInt(ores.bronze) - parseInt(prices.bronze),
+            'diamond': parseInt(ores.diamond) - parseInt(prices.diamond),
+            'gold': parseInt(ores.gold) - parseInt(prices.gold),
+            'ifirald': parseInt(ores.ifirald) - parseInt(prices.ifirald),
+            'iron': parseInt(ores.iron) - parseInt(prices.iron),
+            'silver': parseInt(ores.silver) - parseInt(prices.silver),
+          })
+          .catch((error) => {
+            res.send({code: 400, message: error.message});
+          })
+        res.send({status: "Added!"});
+      }
+      else
+        res.send({code: 400, message: "Ma már nem lehet ennyi pontra váltani. Próbáld holnap!"});
     else
-      res.send({code: 400, message: "Ma már nem lehet ennyi pontra váltani. Próbáld holnap!"});
+      res.send({code: 400, message: "Nincs elég érc a pont beváltásásrs!"});
   })
 });
 
