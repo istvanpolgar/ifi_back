@@ -35,13 +35,12 @@ const jwt = require('jsonwebtoken');
 //CRON-JOB
 let CronJob = require('cron').CronJob;
 
-var job = new CronJob('59 23 * * * *', async function () {
+var job = new CronJob('0 0 * * * *', async function () {
   let dp = 0;
   await database.ref('daily_points')
     .once('value')
     .then( (point) => {
       dp = point.val();
-      console.log(dp);
     })
     .catch((error) => {
       console.log(error.message);
@@ -61,7 +60,7 @@ var job = new CronJob('59 23 * * * *', async function () {
     .catch((error) => {
       console.log(error.message);
     })
-}, null, true, 'Europe/Athens');
+}, null, true, 'Europe/Bucharest');
 
 job.start();
 
@@ -1221,7 +1220,9 @@ app.post('/addxp', (req, res) => {
     }
 
     let id = 0;
+    let db = 0;
     let xp_now = 0;
+    let date = new Date().toLocaleString();
 
     await database.ref('users')
       .once('value')
@@ -1234,6 +1235,29 @@ app.post('/addxp', (req, res) => {
           }
         })
       })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('added')
+      .once('value')
+      .then( (ad) => { db = ad.val().db +1; })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('added/' + db)
+      .set({ 
+        team: team,
+        xp: xp,
+        date: date 
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('added')
+      .update({ 'db': db })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
@@ -1571,7 +1595,9 @@ app.post('/addpoint', (req, res) => {
     }
 
     let id = 0;
+    let db = 0;
     let point_now = 0;
+    let date = new Date().toLocaleString();
 
     await database.ref('users')
       .once('value')
@@ -1584,6 +1610,29 @@ app.post('/addpoint', (req, res) => {
           }
         })
       })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('added')
+      .once('value')
+      .then( (ad) => { db = ad.val().db +1; })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('added/' + db)
+      .set({ 
+        team: team,
+        point: point,
+        date: date 
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('added')
+      .update({ 'db': db })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
