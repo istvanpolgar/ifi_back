@@ -35,7 +35,7 @@ const jwt = require('jsonwebtoken');
 //CRON-JOB
 let CronJob = require('cron').CronJob;
 
-var job = new CronJob('0 0 * * * *', async function () {
+var job = new CronJob('0 0 * * *', async function () {
   let dp = 0;
   await database.ref('daily_points')
     .once('value')
@@ -1769,7 +1769,7 @@ app.post('/ores_to_points', (req, res) => {
       else
         res.send({code: 400, message: "Ma már nem lehet ennyi pontra váltani. Próbáld holnap!"});
     else
-      res.send({code: 400, message: "Nincs elég érc a pont beváltásásrs!"});
+      res.send({code: 400, message: "Nincs elég érc a pont beváltásra!"});
   })
 });
 
