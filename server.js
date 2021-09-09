@@ -25,7 +25,7 @@ const port = process.env.PORT || 8080;
 //ADMIN
 
 const admin_email = 'ifiteka@gmail.com';
-const admin_pass = 'legjobbcsapat';
+const admin_pass = 'anyuakiraly';
 
 //TOKEN
 const refreshTokenSecret = 'thisisatokensecret';
@@ -116,18 +116,18 @@ app.post('/signin', async (req, res) => {
 app.post('/signup', async (req, res) => {
   const { team, email, password } = req.body;
 
-  const xp = 0;
-  const dp = 0;
+  let xp = 0;
+  let dp = 0;
 
   await database.ref('starter_xp')
-      .once('value')
-      .then( (st_xp) => {
-        xp = st_xp.val();
-      })
-      .catch((error) => {
-        res.send({code: 400, message: error.message});
-      })
-  
+    .once('value')
+    .then( (st_xp) => {
+      xp = st_xp.val();
+    })
+    .catch((error) => {
+      res.send({code: 400, message: error.message});
+    })
+
   await database.ref('daily_points')
     .once('value')
     .then( (point) => {
@@ -142,7 +142,7 @@ app.post('/signup', async (req, res) => {
     admin.createUserWithEmailAndPassword(email, password)
     .then( () => {
       admin.currentUser.sendEmailVerification()
-      .then( () => {
+      .then(() => {
         database.ref('users/' + admin.currentUser.uid)
         .set({
             team: team,
