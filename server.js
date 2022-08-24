@@ -24,8 +24,8 @@ const port = process.env.PORT || 8080;
 
 //ADMIN
 
-const admin_email = 'ifiteka@gmail.com';
-const admin_pass = 'anyuakiraly';
+const admin_email = 'istvanpolgar@yahoo.com';
+const admin_pass = 'Isacson93';
 
 //TOKEN
 const refreshTokenSecret = 'thisisatokensecret';
@@ -114,7 +114,7 @@ app.post('/signin', async (req, res) => {
 });
 
 app.post('/signup', async (req, res) => {
-  const { team, email, password } = req.body;
+  const { team, name, email, password } = req.body;
 
   let xp = 0;
   let dp = 0;
