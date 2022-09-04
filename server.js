@@ -146,20 +146,22 @@ app.post('/signup', async (req, res) => {
         database.ref('users/' + admin.currentUser.uid)
         .set({
             team: team,
+            name: name,
             email: email,
             password: password,
             xp: xp,
             point: 0,
-            trades: 0,
             daily_point: dp,
-            ores: {
-              iron: 0,
-              bronze: 0,
-              silver: 0,
-              gold: 0,
-              diamond: 0,
-              ifirald: 0
-            }
+            ifipoint: 0,
+            trades: 0,
+            parts: {
+              shupp: 0,
+              omlas: 0,
+              porkolt: 0,
+              kaloz: 0,
+              malna:0
+            },
+            part: 'shupp'
         })
         .then( () => {
           database.ref('xp_missions/' + admin.currentUser.uid)
@@ -219,9 +221,10 @@ app.post('/team_info', async (req, res) => {
         return res.send({code: 400, message: "Nem létező token!"});
     }
 
-    let points = [];
+    let prices = {};
     let stats = {};
     let hxp = 0;
+    let team = "";
     
     await database.ref('hour_xp')
       .once('value')
@@ -232,12 +235,10 @@ app.post('/team_info', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
-    await database.ref('ores_to_points')
+    await database.ref('part_prices')
       .once('value')
-      .then((otp) => { 
-        otp.forEach( (o) => {
-          points.push(o.val());
-        })
+      .then((pric) => { 
+        prices = pric.val();
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -250,17 +251,24 @@ app.post('/team_info', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
+    await database.ref('users/' + jwt.decode(token).id)
+      .once('value')
+      .then((user) => { team = user.val().team; })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
     res.send({
       token: token,
       role: jwt.decode(token).role,
       stats: stats,
-      points: points,
-      hxp: hxp
+      prices: prices,
+      hxp: hxp,
+      team: team
     });
   });
 });
 
-app.post('/ore_prices', async (req, res) => {
+app.post('/part_price', async (req, res) => {
   const token = req.headers.authorization.split(' ')[1];
 
   if (!token) {
@@ -275,18 +283,57 @@ app.post('/ore_prices', async (req, res) => {
     if (err) {
         return res.send({code: 400, message: "Nem létező token!"});
     }
-    await database.ref('prices')
+    await database.ref('part_price')
       .once('value')
-      .then((prices) => {
+      .then((price) => {
         res.send({
           token: token,
           role: jwt.decode(token).role,
-          prices: prices.val()
+          price: price.val()
         });
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
+  });
+});
+
+app.post('/prices', async (req, res) => {
+  const token = req.headers.authorization.split(' ')[1];
+
+  if (!token) {
+      return res.send({code: 400, message: "Hiányzó token!"});;
+  }
+
+  if (!refreshTokens.includes(token)) {
+      return res.send({code: 400, message: "Helytelen token!"});
+  }
+
+  jwt.verify(token, refreshTokenSecret, async (err) => {
+    if (err) {
+        return res.send({code: 400, message: "Nem létező token!"});
+    }
+
+    let prices = [];
+
+    await database.ref('part_prices')
+      .once('value')
+      .then((priceses) => {
+        priceses.forEach((price) => {
+          prices.push({
+            'name': price.key,
+            'price': price.val()
+          })
+        })
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+      res.send({
+        token: token,
+        role: jwt.decode(token).role,
+        prices: prices
+      });
   });
 });
 
@@ -307,27 +354,22 @@ app.post('/shop', async (req, res) => {
         return res.send({code: 400, message: "Nem létező token!"});
     }
 
-    let ores = {};
+    let part = 0;
     let xp = 0;
 
-    await database.ref('users/' + jwt.decode(token).id)
+    await database.ref('users/' + jwt.decode(token).id + '/parts/' + shop.part)
       .once('value')
-      .then(async (user) => {
-        ores = user.val().ores;
+      .then(async (p) => {
+        part = p.val();
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
 
     await database.ref('users/' + jwt.decode(token).id)
-      .child('ores')
+      .child('parts')
       .update({
-        'bronze': parseInt(ores.bronze) + parseInt(shop.bronze),
-        'diamond': parseInt(ores.diamond) + parseInt(shop.diamond),
-        'gold': parseInt(ores.gold) + parseInt(shop.gold),
-        'ifirald': parseInt(ores.ifirald) + parseInt(shop.ifirald),
-        'iron': parseInt(ores.iron) + parseInt(shop.iron),
-        'silver': parseInt(ores.silver) + parseInt(shop.silver),
+        [shop.part]: parseInt(part) + parseInt(shop.buy)
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -430,7 +472,7 @@ app.post('/all_teams', async (req, res) => {
 
 app.post('/trade', async (req, res) => {
   const token = req.headers.authorization.split(' ')[1];
-  const {pushed_ores, waited_ores, team} = req.body;
+  const {part, nr,  team} = req.body;
 
   if (!token) {
       return res.send({code: 400, message: "Hiányzó token!"});;
@@ -446,7 +488,9 @@ app.post('/trade', async (req, res) => {
     }
 
     let id = 0;
-    let ores = {};
+    let other_team_part = "";
+    let part_nr = 0;
+    let now = new Date();
 
     await database.ref('users/' + jwt.decode(token).id)
       .once('value')
@@ -457,10 +501,23 @@ app.post('/trade', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
+    await database.ref('users/')
+      .once('value')
+      .then(async (users) => {
+        users.forEach(user => {
+          if(user.val().team == team)
+            other_team_part = user.val().part;
+        });
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+    })
+
     await database.ref('trade/' + jwt.decode(token).id + '/' + id)
       .set({
-          pushed_ores: pushed_ores,
-          waited_ores: waited_ores,
+          give: part,
+          get: other_team_part,
+          nr: nr,
           team: team
       })
       .catch((error) => {
@@ -469,9 +526,13 @@ app.post('/trade', async (req, res) => {
 
     await database.ref('all_trades/' + jwt.decode(token).id + '/' + id)
       .set({
-          pushed_ores: pushed_ores,
-          waited_ores: waited_ores,
+          give: part,
+          get: other_team_part,
+          nr: nr,
           team: team,
+          push_time: now.toLocaleString('ro-RO'),
+          refuze_time: "",
+          accept_time: "",
           state: "kiközölt"
       })
       .catch((error) => {
@@ -486,24 +547,19 @@ app.post('/trade', async (req, res) => {
         res.send({code: 400, message: error.message});
     })
 
-    await database.ref('users/' + jwt.decode(token).id)
+    await database.ref('users/' + jwt.decode(token).id + '/parts/' + part)
       .once('value')
-      .then(async (user) => {
-        ores = user.val().ores;
+      .then(async (p) => {
+        part_nr = p.val();
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
     })
 
     await database.ref('users/' + jwt.decode(token).id)
-      .child('ores')
+      .child('parts')
       .update({
-        'bronze': parseInt(ores.bronze) - parseInt(pushed_ores.bronze),
-        'diamond': parseInt(ores.diamond) - parseInt(pushed_ores.diamond),
-        'gold': parseInt(ores.gold) - parseInt(pushed_ores.gold),
-        'ifirald': parseInt(ores.ifirald) - parseInt(pushed_ores.ifirald),
-        'iron': parseInt(ores.iron) - parseInt(pushed_ores.iron),
-        'silver': parseInt(ores.silver) - parseInt(pushed_ores.silver),
+        [part]: parseInt(part_nr) - parseInt(nr)
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -637,8 +693,10 @@ app.post('/refuze_trade', async (req, res) => {
 
     let this_team = "";
     let pushed_team_id = "";
-    let ores = {};
+    let part = "";
+    let part_nr = 0;
     let nr = 0;
+    let now = new Date();
 
     await database.ref('users/' + jwt.decode(token).id)
       .once('value')
@@ -666,7 +724,7 @@ app.post('/refuze_trade', async (req, res) => {
       .once('value')
       .then( (trades) => {
         trades.forEach( (t) => {
-          if(t.val().team === this_team && JSON.stringify(t.val().pushed_ores) === JSON.stringify(trade.trade.pushed_ores) && JSON.stringify(t.val().waited_ores) === JSON.stringify(trade.trade.waited_ores)) 
+          if(t.val().team === this_team && JSON.stringify(t.val().give) === JSON.stringify(trade.trade.give) && JSON.stringify(t.val().get) === JSON.stringify(trade.trade.get) && JSON.stringify(t.val().nr) === JSON.stringify(trade.trade.nr)) 
             nr = t.key;
         })
       })
@@ -676,7 +734,8 @@ app.post('/refuze_trade', async (req, res) => {
     
     await database.ref('trade/' + pushed_team_id + "/" + nr)
       .update({
-        'state': "elutasítva a(z) " + this_team + " csapattól"
+        'state': "elutasítva a(z) " + this_team + " csapattól",
+        'refuze_time': now.toLocaleString('ro-RO')
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -688,24 +747,28 @@ app.post('/refuze_trade', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
-    await database.ref('users/' + pushed_team_id)
+    await database.ref('users/' + pushed_team_id + '/part')
       .once('value')
-      .then( (user) => {
-        ores = user.val().ores;
+      .then( (p) => {
+          part = p.val();
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('users/' + pushed_team_id + '/parts/' + part)
+      .once('value')
+      .then( (p) => {
+          part_nr = p.val();
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
     
     await database.ref('users/' + pushed_team_id)
-      .child('ores')
+      .child('parts')
       .update({
-        'bronze': parseInt(ores.bronze) + parseInt(trade.trade.pushed_ores.bronze),
-        'diamond': parseInt(ores.diamond) + parseInt(trade.trade.pushed_ores.diamond),
-        'gold': parseInt(ores.gold) + parseInt(trade.trade.pushed_ores.gold),
-        'ifirald': parseInt(ores.ifirald) + parseInt(trade.trade.pushed_ores.ifirald),
-        'iron': parseInt(ores.iron) + parseInt(trade.trade.pushed_ores.iron),
-        'silver': parseInt(ores.silver) + parseInt(trade.trade.pushed_ores.silver),
+        [part]: parseInt(part_nr) + parseInt(trade.trade.nr)
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -716,7 +779,7 @@ app.post('/refuze_trade', async (req, res) => {
 
 app.post('/refuze_trade2', async (req, res) => {
   const token = req.headers.authorization.split(' ')[1];
-  const { trade } = req.body;
+  const { part, trade } = req.body;
 
   if (!token) {
       return res.send({code: 400, message: "Hiányzó token!"});;
@@ -731,53 +794,51 @@ app.post('/refuze_trade2', async (req, res) => {
         return res.send({code: 400, message: "Nem létező token!"});
     }
     
-    let ores = {};
+    let part_nr = 0;
     let nr = 0;
+    let now = new Date();
     
     await database.ref('trade/' + jwt.decode(token).id)
       .once('value')
       .then( (trades) => {
         trades.forEach( (t) => {
-          if(t.val().team === trade.team && JSON.stringify(t.val().pushed_ores) === JSON.stringify(trade.trade.pushed_ores) && JSON.stringify(t.val().waited_ores) === JSON.stringify(trade.trade.waited_ores)) 
+          if(t.val().team === trade.team && JSON.stringify(t.val().give) === JSON.stringify(trade.trade.give) && JSON.stringify(t.val().get) === JSON.stringify(trade.trade.get) && JSON.stringify(t.val().nr) === JSON.stringify(trade.trade.nr)) 
             nr = t.key;
         })
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
+      
     
-    await database.ref('trade/' + jwt.decode(token).id + "/" + nr)
+    await database.ref('all_trades/' + jwt.decode(token).id + "/" + nr)
       .update({
-        'state': "visszavont"
+        'state': "visszavont",
+        'refuze_time': now.toLocaleString('ro-RO')
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
-
+    
     await database.ref('trade/' + jwt.decode(token).id + "/" + nr)
       .remove()
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
+    
+      await database.ref('users/' + jwt.decode(token).id + '/parts/' + part)
+        .once('value')
+        .then( (p) => {
+            part_nr = p.val();
+        })
+        .catch((error) => {
+          res.send({code: 400, message: error.message});
+        })
 
     await database.ref('users/' + jwt.decode(token).id)
-      .once('value')
-      .then( (user) => {
-        ores = user.val().ores;
-      })
-      .catch((error) => {
-        res.send({code: 400, message: error.message});
-      })
-    
-    await database.ref('users/' + jwt.decode(token).id)
-      .child('ores')
+      .child('parts')
       .update({
-        'bronze': parseInt(ores.bronze) + parseInt(trade.trade.pushed_ores.bronze),
-        'diamond': parseInt(ores.diamond) + parseInt(trade.trade.pushed_ores.diamond),
-        'gold': parseInt(ores.gold) + parseInt(trade.trade.pushed_ores.gold),
-        'ifirald': parseInt(ores.ifirald) + parseInt(trade.trade.pushed_ores.ifirald),
-        'iron': parseInt(ores.iron) + parseInt(trade.trade.pushed_ores.iron),
-        'silver': parseInt(ores.silver) + parseInt(trade.trade.pushed_ores.silver),
+        [part]: parseInt(part_nr) + parseInt(trade.trade.nr)
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -788,7 +849,7 @@ app.post('/refuze_trade2', async (req, res) => {
 
 app.post('/accept_trade', async (req, res) => {
   const token = req.headers.authorization.split(' ')[1];
-  const { trade } = req.body;
+  const { part, trade } = req.body;
 
   if (!token) {
       return res.send({code: 400, message: "Hiányzó token!"});;
@@ -805,9 +866,12 @@ app.post('/accept_trade', async (req, res) => {
 
     let this_team = "";
     let pushed_team_id = "";
-    let our_ores = {};
-    let your_ores = {};
+    let other_team_part = "";
+    let other_team_part_nr = 0;
+    let part_nr = 0;
+    let part_nr2 = 0;
     let nr = 0;
+    let now = new Date();
 
     await database.ref('users/' + jwt.decode(token).id)
       .once('value')
@@ -835,7 +899,7 @@ app.post('/accept_trade', async (req, res) => {
       .once('value')
       .then( (trades) => {
         trades.forEach( (t) => {
-          if(t.val().team === this_team && JSON.stringify(t.val().pushed_ores) === JSON.stringify(trade.trade.pushed_ores) && JSON.stringify(t.val().waited_ores) === JSON.stringify(trade.trade.waited_ores)) 
+          if(t.val().team === this_team && JSON.stringify(t.val().give) === JSON.stringify(trade.trade.give) && JSON.stringify(t.val().get) === JSON.stringify(trade.trade.get) && JSON.stringify(t.val().nr) === JSON.stringify(trade.trade.nr)) 
             nr = t.key;
         })
       })
@@ -845,7 +909,8 @@ app.post('/accept_trade', async (req, res) => {
     
     await database.ref('all_trades/' + pushed_team_id + "/" + nr)
       .update({
-        'state': "elfogadva a(z) " + this_team + " csapattól"
+        'state': "elfogadva a(z) " + this_team + " csapattól",
+        'accept_time': now.toLocaleString('ro-RO')
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -857,47 +922,56 @@ app.post('/accept_trade', async (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
-    await database.ref('users/' + jwt.decode(token).id)
+    await database.ref('users/' + pushed_team_id + '/part')
       .once('value')
-      .then( (user) => {
-        our_ores = user.val().ores;
+      .then( (p) => {
+          other_team_part = p.val();
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+    
+    await database.ref('users/' + jwt.decode(token).id + '/parts/' + other_team_part)
+      .once('value')
+      .then( (p) => {
+        part_nr = p.val();
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+    
+    await database.ref('users/' + jwt.decode(token).id + '/parts/' + part)
+      .once('value')
+      .then( (p) => {
+        part_nr2 = p.val();
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
 
-    await database.ref('users/' + pushed_team_id)
+    await database.ref('users/' + pushed_team_id + '/parts/' + part)
       .once('value')
-      .then( (user) => {
-        your_ores = user.val().ores;
+      .then( (p) => {
+          other_team_part_nr = p.val();
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
     
     await database.ref('users/' + jwt.decode(token).id)
-      .child('ores')
+      .child('parts')
       .update({
-        'bronze': parseInt(our_ores.bronze) - parseInt(trade.trade.waited_ores.bronze) + parseInt(trade.trade.pushed_ores.bronze),
-        'diamond': parseInt(our_ores.diamond) - parseInt(trade.trade.waited_ores.diamond) + parseInt(trade.trade.pushed_ores.diamond),
-        'gold': parseInt(our_ores.gold) - parseInt(trade.trade.waited_ores.gold) + parseInt(trade.trade.pushed_ores.gold),
-        'ifirald': parseInt(our_ores.ifirald) - parseInt(trade.trade.waited_ores.ifirald) + parseInt(trade.trade.pushed_ores.ifirald),
-        'iron': parseInt(our_ores.iron) - parseInt(trade.trade.waited_ores.iron) + parseInt(trade.trade.pushed_ores.iron),
-        'silver': parseInt(our_ores.silver) - parseInt(trade.trade.waited_ores.silver) + parseInt(trade.trade.pushed_ores.silver),
+        [part]: parseInt(part_nr2) - parseInt(trade.trade.nr),
+        [other_team_part]: parseInt(part_nr) + parseInt(trade.trade.nr)
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
 
     await database.ref('users/' + pushed_team_id)
-      .child('ores')
+      .child('parts')
       .update({
-        'bronze': parseInt(your_ores.bronze) + parseInt(trade.trade.waited_ores.bronze),
-        'diamond': parseInt(your_ores.diamond) + parseInt(trade.trade.waited_ores.diamond),
-        'gold': parseInt(your_ores.gold) + parseInt(trade.trade.waited_ores.gold),
-        'ifirald': parseInt(your_ores.ifirald) + parseInt(trade.trade.waited_ores.ifirald),
-        'iron': parseInt(your_ores.iron) + parseInt(trade.trade.waited_ores.iron),
-        'silver': parseInt(your_ores.silver) + parseInt(trade.trade.waited_ores.silver),
+        [part]: parseInt(other_team_part_nr) + parseInt(trade.trade.nr)
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -905,7 +979,8 @@ app.post('/accept_trade', async (req, res) => {
       
     res.send({
       team: trade.team,
-      waited_ores: trade.trade.waited_ores
+      nr: trade.trade.nr,
+      part: other_team_part
     });
   });
 });
@@ -955,8 +1030,9 @@ app.post('/team_stats', (req, res) => {
               xp: user.val().xp,
               point: user.val().point,
               daily_point: user.val().daily_point,
+              ifipoint: user.val().ifipoint,
               trades: user.val().trades,
-              ores: user.val().ores
+              parts: user.val().parts
             })
         })
       })
@@ -1030,8 +1106,10 @@ app.post('/get_settings', (req, res) => {
     let xp = 0;
     let dp = 0;
     let hxp = 0;
+    let price = 0;
     let prices = {};
-    let points = {};
+    let parts = {};
+    let selected_parts = [];
 
     await database.ref('starter_xp')
       .once('value')
@@ -1060,29 +1138,56 @@ app.post('/get_settings', (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
-    await database.ref('prices')
+    await database.ref('part_price')
       .once('value')
       .then( (pr) => {
-        prices = pr.val();
+        price = pr.val();
       })
       .catch((error) => { 
         res.send({code: 400, message: error.message});
       })
     
-    await database.ref('ores_to_points')
+    await database.ref('part_prices')
       .once('value')
-      .then( (otp) => {
-        points = otp.val();
+      .then( (pric) => {
+        prices = pric.val();
       })
       .catch((error) => { 
         res.send({code: 400, message: error.message});
       }) 
+
+    await database.ref('parts')
+      .once('value')
+      .then( (p) => {
+        parts = p.val();
+      })
+      .catch((error) => { 
+        res.send({code: 400, message: error.message});
+      }) 
+
+    await database.ref('users/')
+      .once('value')
+      .then( (users) => {
+        users.forEach((user)=>{
+          selected_parts.push({
+            'team': user.val().team,
+            'part': user.val().part,
+          })
+        })
+        
+      })
+      .catch((error) => { 
+        res.send({code: 400, message: error.message});
+      }) 
+      
     res.send({
       dp: dp,
       xp: xp,
       hxp: hxp,
+      parts: parts,
+      price: price,
       prices: prices,
-      points: points
+      selected_parts: selected_parts
     });
   })
 });
@@ -1091,18 +1196,15 @@ app.post('/setup', (req, res) => {
   const token = req.headers.authorization.split(' ')[1];
 
   const {
-    dailyPoint,
     starterXp,
-    priceIron,
-    priceBronze,
-    priceSilver,
-    priceGold,
-    priceDiamond,
-    priceIfirald,
+    pricePart,
+    dailyPoint,
+    hourXp,
     houndred1,
     houndred2,
     houndred3,
     houndred4,
+    parts
   } = req.body;
 
   if (!token) {
@@ -1125,78 +1227,54 @@ app.post('/setup', (req, res) => {
       })
 
     await database.ref('/')
+      .update({ 'part_price': pricePart })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('/')
       .update({ 'daily_points': dailyPoint })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
 
-    await database.ref('prices')
-      .update({ 
-        'bronze': priceBronze,
-        'diamond': priceDiamond,
-        'gold': priceGold,
-        'ifirald': priceIfirald,
-        'iron': priceIron,
-        'silver': priceSilver,
-      })
+    await database.ref('/')
+      .update({ 'hour_xp': hourXp })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
 
-    await database.ref('ores_to_points')
-    .child('houndred1')
+    await database.ref('part_prices')
       .update({ 
-        'bronze': houndred1.bronze,
-        'diamond': houndred1.diamond,
-        'gold': houndred1.gold,
-        'ifirald': houndred1.ifirald,
-        'iron': houndred1.iron,
-        'silver': houndred1.silver,
+        'houndred1': houndred1,
+        'houndred2': houndred2,
+        'houndred3': houndred3,
+        'houndred4': houndred4
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
-
-    await database.ref('ores_to_points')
-      .child('houndred2')
-        .update({ 
-          'bronze': houndred2.bronze,
-          'diamond': houndred2.diamond,
-          'gold': houndred2.gold,
-          'ifirald': houndred2.ifirald,
-          'iron': houndred2.iron,
-          'silver': houndred2.silver,
+    
+    
+    parts.forEach((p) => {
+      database.ref('users')
+        .once('value')
+        .then( (users) => {
+          users.forEach( (user) => {
+            if(user.val().team === p.team)
+            {
+              database.ref('users/' + user.key)
+                .update({ 'part': p.part })
+                .catch((error) => {
+                  res.send({code: 400, message: error.message});
+                })
+            }
+          })
         })
         .catch((error) => {
           res.send({code: 400, message: error.message});
         })
-    await database.ref('ores_to_points')
-      .child('houndred3')
-        .update({ 
-          'bronze': houndred3.bronze,
-          'diamond': houndred3.diamond,
-          'gold': houndred3.gold,
-          'ifirald': houndred3.ifirald,
-          'iron': houndred3.iron,
-          'silver': houndred3.silver,
-        })
-        .catch((error) => {
-          res.send({code: 400, message: error.message});
-        })
-
-    await database.ref('ores_to_points')
-      .child('houndred4')
-        .update({ 
-          'bronze': houndred4.bronze,
-          'diamond': houndred4.diamond,
-          'gold': houndred4.gold,
-          'ifirald': houndred4.ifirald,
-          'iron': houndred4.iron,
-          'silver': houndred4.silver,
-        })
-        .catch((error) => {
-          res.send({code: 400, message: error.message});
-        })
+    })
     res.send({status: "Updated!"});
   })
 });
@@ -1597,7 +1675,7 @@ app.post('/addpoint', (req, res) => {
     let id = 0;
     let db = 0;
     let point_now = 0;
-    let date = new Date().toLocaleString();
+    let now = new Date();
 
     await database.ref('users')
       .once('value')
@@ -1625,7 +1703,7 @@ app.post('/addpoint', (req, res) => {
       .set({ 
         team: team,
         point: point,
-        date: date 
+        date: now.toLocaleString('ro-RO') 
       })
       .catch((error) => {
         res.send({code: 400, message: error.message});
@@ -1693,7 +1771,7 @@ app.post('/takepoint', (req, res) => {
   })
 });
 
-app.post('/ores_to_points', (req, res) => {
+app.post('/cash_ifipoint', (req, res) => {
   const token = req.headers.authorization.split(' ')[1];
 
   const { team, otp } = req.body;
@@ -1715,8 +1793,8 @@ app.post('/ores_to_points', (req, res) => {
 
     let id = 0;
     let dp = 0;
-    let ores = {};
-    let prices = {};
+    let ifipoint = 0;
+    let price = 0;
 
     await database.ref('users')
       .once('value')
@@ -1725,8 +1803,8 @@ app.post('/ores_to_points', (req, res) => {
           if(user.val().team === team)
           {
             id = user.key;
+            ifipoint = user.val().ifipoint;
             dp = user.val().daily_point;
-            ores = user.val().ores;
           }
         })
       })
@@ -1734,15 +1812,15 @@ app.post('/ores_to_points', (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
-    await database.ref('ores_to_points/' + point_name)
+    await database.ref('part_prices/' + point_name)
       .once('value')
-      .then( (o) => { prices = o.val(); })
+      .then( (o) => { price = o.val(); })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
 
-    if(ores.bronze >= prices.bronze && ores.diamond >= prices.diamond && ores.gold >= prices.gold && ores.ifirald >= prices.ifirald && ores.iron >= prices.iron && ores.silver >= prices.silver)
-      if(dp - otp >= 0) {
+    if(ifipoint >= price)
+      if(dp >= otp) {
         await database.ref('users/' + id)
           .update({ 
             'daily_point': parseInt(dp) - parseInt(otp),
@@ -1752,14 +1830,8 @@ app.post('/ores_to_points', (req, res) => {
           })
 
         await database.ref('users/' + id)
-          .child('ores')
           .update({ 
-            'bronze': parseInt(ores.bronze) - parseInt(prices.bronze),
-            'diamond': parseInt(ores.diamond) - parseInt(prices.diamond),
-            'gold': parseInt(ores.gold) - parseInt(prices.gold),
-            'ifirald': parseInt(ores.ifirald) - parseInt(prices.ifirald),
-            'iron': parseInt(ores.iron) - parseInt(prices.iron),
-            'silver': parseInt(ores.silver) - parseInt(prices.silver),
+            'ifipoint': parseInt(ifipoint) - parseInt(price)
           })
           .catch((error) => {
             res.send({code: 400, message: error.message});
@@ -1769,7 +1841,7 @@ app.post('/ores_to_points', (req, res) => {
       else
         res.send({code: 400, message: "Ma már nem lehet ennyi pontra váltani. Próbáld holnap!"});
     else
-      res.send({code: 400, message: "Nincs elég érc a pont beváltásra!"});
+      res.send({code: 400, message: "Nincs elég ifi pont a pont beváltásra!"});
   })
 });
 
@@ -1820,6 +1892,95 @@ app.post('/get_missions', (req, res) => {
       })
     
     res.send({missions: missions});
+  })
+});
+
+app.post('/add_ifipoint', (req, res) => {
+  const token = req.headers.authorization.split(' ')[1];
+  const { team } = req.body;
+
+  if (!token) {
+    return res.send({code: 400, message: "Hiányzó token!"});;
+  }
+
+  if (!refreshTokens.includes(token)) {
+      return res.send({code: 400, message: "Helytelen token!"});
+  }
+
+  jwt.verify(token, refreshTokenSecret, async (err) => {
+    if (err) {
+        return res.send({code: 400, message: "Nem létező token!"});
+    }
+
+    let id = 0;
+    let db = 0;
+    let point_now = 0;
+    let now = new Date();
+    let parts = {};
+
+    await database.ref('users')
+      .once('value')
+      .then( (users) => {
+        users.forEach( (user) => {
+          if(user.val().team === team)
+          {
+            id = user.key;
+            point_now = user.val().ifipoint;
+          }
+        })
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('getted_ifipoits')
+      .once('value')
+      .then( (ad) => { db = ad.val().db +1; })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('getted_ifipoits/' + db)
+      .set({ 
+        team: team,
+        date: now.toLocaleString('ro-RO') 
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('getted_ifipoits')
+      .update({ 'db': db })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('users/' + id)
+      .update({ 'ifipoint': parseInt(point_now) + parseInt(1) })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+    
+    await database.ref('users/' + id + '/parts')
+      .once('value')
+      .then( (part) => { parts = part.val(); })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('users/' + id + '/parts')
+      .update({ 
+        'shupp': parseInt(parts.shupp) - parseInt(1),
+        'omlas': parseInt(parts.omlas) - parseInt(1),
+        'porkolt': parseInt(parts.porkolt) - parseInt(1),
+        'kaloz': parseInt(parts.kaloz) - parseInt(1),
+        'malna': parseInt(parts.malna) - parseInt(1),
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    res.send({status: "Added!"});
   })
 });
 
