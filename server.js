@@ -24,8 +24,8 @@ const port = process.env.PORT || 8080;
 
 //ADMIN
 
-const admin_email = 'istvanpolgar@yahoo.com';
-const admin_pass = 'Isacson93';
+const admin_email = 'ifiteka@gmail.com';
+const admin_pass = 'anyuakiraly';
 
 //TOKEN
 const refreshTokenSecret = 'thisisatokensecret';
