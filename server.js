@@ -1703,6 +1703,7 @@ app.post('/addpoint', (req, res) => {
       .set({ 
         team: team,
         point: point,
+        state: 'added',
         date: now.toLocaleString('ro-RO') 
       })
       .catch((error) => {
@@ -1761,13 +1762,37 @@ app.post('/takepoint', (req, res) => {
         res.send({code: 400, message: error.message});
       })
 
+      await database.ref('added')
+      .once('value')
+      .then( (ad) => { db = ad.val().db +1; })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('added/' + db)
+      .set({ 
+        team: team,
+        point: point,
+        state: 'taked',
+        date: now.toLocaleString('ro-RO') 
+      })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
+    await database.ref('added')
+      .update({ 'db': db })
+      .catch((error) => {
+        res.send({code: 400, message: error.message});
+      })
+
     await database.ref('users/' + id)
       .update({ 'point': parseInt(point_now) - parseInt(point) })
       .catch((error) => {
         res.send({code: 400, message: error.message});
       })
 
-    res.send({status: "Added!"});
+    res.send({status: "Taked!"});
   })
 });
 
